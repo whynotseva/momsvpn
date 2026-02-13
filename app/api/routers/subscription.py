@@ -119,17 +119,20 @@ async def subscription_proxy(token: str, request: Request):
             if response.status_code != 200:
                 return PlainTextResponse(content=response.text, status_code=response.status_code)
             
-            # Get Marzban links and decode from base64 if needed
+            # Get upstream links and decode from base64 if needed
             all_links = []
-            marzban_content = response.text.strip()
+            upstream_content = response.text.strip()
             
-            for line in marzban_content.split('\n'):
+            # DEBUG: Log raw content to see if Hysteria2 is present
+            logger.info(f"Raw subscription content for {token[:10]}...: {upstream_content[:500]}...")
+            
+            for line in upstream_content.split('\n'):
                 line = line.strip()
                 if not line:
                     continue
                     
                 # Check if it's already a plain link
-                if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://')):
+                if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://')):
                     all_links.append(line)
                 else:
                     # Try to decode base64
@@ -138,7 +141,7 @@ async def subscription_proxy(token: str, request: Request):
                         # Split if multiple links in one base64 block
                         for decoded_line in decoded.split('\n'):
                             decoded_line = decoded_line.strip()
-                            if decoded_line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://')):
+                            if decoded_line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://')):
                                 all_links.append(decoded_line)
                     except Exception:
                         # If can't decode, skip

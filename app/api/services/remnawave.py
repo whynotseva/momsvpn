@@ -40,37 +40,48 @@ class RemnawaveService:
         Совместимость: принимает username (user_123), ищет в Remnawave.
         fetch_devices: Если True, загружает список устройств через SSH.
         """
+    async def get_user(self, username: str, fetch_devices: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Получить информацию о пользователе.
+        Ищет по всем страницам через get_all_users, так как прямой поиск по API сломан.
+        """
         try:
-            headers = await self._get_headers()
-            response = await self.client.get(
-                f"{self.base_url}/api/users",
-                headers=headers
-            )
+            # Получаем всех пользователей (с учетом пагинации)
+            all_users = await self.get_all_users()
             
-            if response.status_code == 200:
-                data = response.json()
-                users = data.get("response", {}).get("users", [])
-                
-                # Ищем по username
-                for user in users:
-                    if user.get("username") == username:
-                        return await self._convert_user_format(user, fetch_devices=fetch_devices)
-                
-                # Если не нашли по username, пробуем по telegram_id
-                if username.startswith("user_"):
-                    try:
-                        tg_id = int(username.replace("user_", ""))
-                        for user in users:
-                            if user.get("telegramId") == tg_id:
-                                return await self._convert_user_format(user, fetch_devices=fetch_devices)
-                    except ValueError:
-                        pass
-                
-                return None
+            target_user = None
             
-            if response.status_code == 401:
-                logger.error("Remnawave: Invalid API key")
+            # 1. Точное совпадение username
+            for user in all_users:
+                if user.get("username") == username:
+                    target_user = user
+                    break
             
+            # 2. Поиск по Telegram ID (если username = user_123)
+            if not target_user and username.startswith("user_"):
+                try:
+                    tg_id = int(username.replace("user_", ""))
+                    for user in all_users:
+                        if user.get("telegram_id") == tg_id:
+                            target_user = user
+                            break
+                except ValueError:
+                    pass
+            
+            if target_user:
+                # Если нужны устройства, подгружаем через SSH (так как get_all_users их не грузит)
+                if fetch_devices:
+                    # В target_user['sub_last_user_agent'] лежит сырая строка, если мы её не обогатили
+                    # Но нам нужен UUID (он есть в hidden поле _uuid)
+                    
+                    user_uuid = target_user.get("_uuid")
+                    if user_uuid:
+                        model = await self._get_device_model_from_ssh(user_uuid)
+                        if model:
+                            target_user["sub_last_user_agent"] = model
+                            
+                return target_user
+                
             return None
             
         except Exception as e:
@@ -79,6 +90,7 @@ class RemnawaveService:
     
     async def get_all_users(self) -> List[Dict[str, Any]]:
         """Получить всех пользователей из Remnawave (с поддержкой пагинации)."""
+        all_users = []
         # Используем running offset, так как сервер может возвращать меньше записей, чем limit
         current_offset = 0
         limit = 50 # Запрашиваем по 50, но сервер может отдать 25
