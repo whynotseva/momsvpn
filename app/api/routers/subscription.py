@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sub", tags=["subscription"])
 
 MARZBAN_URL = os.getenv("MARZBAN_URL", "https://instabotwebhook.ru:8000")
+HYSTERIA2_HOST = os.getenv("HYSTERIA2_HOST", "instabotwebhook.ru")
+HYSTERIA2_PORT = os.getenv("HYSTERIA2_PORT", "443")
+HYSTERIA2_SNI = os.getenv("HYSTERIA2_SNI", HYSTERIA2_HOST)
+HYSTERIA2_OBFS_PASSWORD = os.getenv("HYSTERIA2_OBFS_PASSWORD", "")
+HYSTERIA2_INSECURE = os.getenv("HYSTERIA2_INSECURE", "false").lower() == "true"
 
 
 def parse_device_from_headers(headers: dict) -> dict:
@@ -151,6 +156,7 @@ async def subscription_proxy(token: str, request: Request):
             enhanced_links = []
             user_uuid = None  # Will extract from VLESS links
             has_trojan = False  # Track if Trojan already in subscription
+            has_hysteria2 = False  # Track if Hysteria2 already in subscription
             profile_counter = 0
             
             for link in all_links:
@@ -163,6 +169,10 @@ async def subscription_proxy(token: str, request: Request):
                 # Track if Trojan already exists
                 if link.startswith('trojan://'):
                     has_trojan = True
+
+                # Track if Hysteria2 already exists
+                if link.startswith(('hysteria2://', 'hy2://')):
+                    has_hysteria2 = True
                 
                 # Rename profiles with MomsVPN branding
                 if '#' in link:
@@ -189,6 +199,21 @@ async def subscription_proxy(token: str, request: Request):
             if user_uuid and not has_trojan:
                 trojan_link = f"trojan://{user_uuid}@instabotwebhook.ru:443?security=tls&type=ws&path=%2Ftrojanws&sni=instabotwebhook.ru&fp=chrome#✅ Альтернативный Moms"
                 enhanced_links.append(trojan_link)
+
+            # Add Hysteria2 fallback (generated locally because upstream API does not provide it)
+            if user_uuid and not has_hysteria2:
+                hy2_query = [
+                    f"sni={HYSTERIA2_SNI}",
+                    f"insecure={str(HYSTERIA2_INSECURE).lower()}"
+                ]
+                if HYSTERIA2_OBFS_PASSWORD:
+                    hy2_query.extend([
+                        "obfs=salamander",
+                        f"obfs-password={HYSTERIA2_OBFS_PASSWORD}"
+                    ])
+
+                hy2_link = f"hysteria2://{user_uuid}@{HYSTERIA2_HOST}:{HYSTERIA2_PORT}?" + "&".join(hy2_query) + "#✅ Hysteria2 Moms"
+                enhanced_links.append(hy2_link)
             
             # Add Shadowsocks as last resort
             ss_key = "6Xtl5eyOFNZ73i0xfHWeCw=="
